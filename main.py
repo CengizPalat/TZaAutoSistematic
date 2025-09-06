@@ -54,48 +54,30 @@ class RailwayCSVDownloader:
         logger.info(f"🌐 Selenium Remote URL: {self.selenium_remote_url}")
     
     def setup_remote_browser(self):
-        """EXPERT SOLUTION: Use Railway's Remote WebDriver"""
-        logger.info("🌐 Setting up Remote Chrome browser via Railway template...")
+        """Connect to Railway Selenium service"""
+        logger.info("🌐 Connecting to Railway Selenium service...")
         
         try:
-            # Chrome options for remote driver
             chrome_options = Options()
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--disable-gpu")
-            chrome_options.add_argument("--disable-extensions")
-            chrome_options.add_argument("--disable-plugins")
-            chrome_options.add_argument("--window-size=1920,1080")
             
-            # Download preferences
-            prefs = {
-                "download.default_directory": self.download_folder,
-                "download.prompt_for_download": False,
-                "download.directory_upgrade": True,
-                "safebrowsing.enabled": True
-            }
-            chrome_options.add_experimental_option("prefs", prefs)
+            selenium_url = os.getenv('SELENIUM_REMOTE_URL', 'https://standalone-chrome-production-eb24.up.railway.app/wd/hub')
             
-            # User agent
-            chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            
-            # Create remote WebDriver connection
-            logger.info(f"🔗 Connecting to remote Selenium: {self.selenium_remote_url}")
+            logger.info(f"🔗 Connecting to: {selenium_url}")
             
             self.driver = webdriver.Remote(
-                command_executor=self.selenium_remote_url,
+                command_executor=selenium_url,
                 options=chrome_options
             )
             
-            logger.info("✅ Remote Chrome browser setup complete!")
+            logger.info("✅ Railway Selenium connected successfully!")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Remote browser setup failed: {e}")
-            
-            # FALLBACK: Try Browserless (as suggested by expert)
-            logger.info("🔄 Trying Browserless fallback...")
-            return self.setup_browserless_fallback()
+            logger.error(f"❌ Railway Selenium connection failed: {e}")
+            return False
     
     def setup_browserless_fallback(self):
         """EXPERT FALLBACK: Use Browserless service"""
