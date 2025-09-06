@@ -161,79 +161,76 @@ class RailwayCSVDownloader:
             return False
     
     def safe_login(self):
-        """FIXED: Enhanced login with better error handling"""
-        logger.info("🔐 Logging into Roblox...")
-        
-        try:
-            # Navigate to login page
-            logger.info("📍 Navigating to Roblox login page...")
-            self.driver.get("https://www.roblox.com/login")
+            """FIXED: Enhanced login with click interception fix"""
+            logger.info("🔐 Logging into Roblox...")
             
-            # FIXED: Better element waiting
-            logger.info("🔍 Looking for username field...")
-            username_field = WebDriverWait(self.driver, 30).until(
-                EC.element_to_be_clickable((By.ID, "login-username"))
-            )
-            
-            # Clear and enter username
-            username_field.clear()
-            time.sleep(0.5)
-            username_field.send_keys(self.alt_username)
-            
-            logger.info("🔍 Looking for password field...")
-            password_field = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.ID, "login-password"))
-            )
-            
-            # Clear and enter password
-            password_field.clear()
-            time.sleep(0.5)
-            password_field.send_keys(self.alt_password)
-            
-            # Human-like delay
-            time.sleep(random.uniform(1, 3))
-            
-            # Find and click login button
-            logger.info("🔍 Looking for login button...")
-            login_button = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.ID, "login-button"))
-            )
-            
-            logger.info("🖱️ Clicking login button...")
-            login_button.click()
-            
-            # Wait for login to complete
-            logger.info("⏳ Waiting for login completion...")
-            WebDriverWait(self.driver, 30).until(
-                lambda driver: "login" not in driver.current_url.lower()
-            )
-            
-            # Verify login success
-            current_url = self.driver.current_url
-            logger.info(f"📍 Current URL after login: {current_url}")
-            
-            success_indicators = ["create.roblox.com", "home", "dashboard"]
-            if any(indicator in current_url for indicator in success_indicators):
-                logger.info("✅ Login successful!")
-                return True
-            else:
-                # Check for specific error indicators
-                page_source = self.driver.page_source.lower()
-                if "captcha" in page_source or "challenge" in page_source:
-                    logger.error("❌ CAPTCHA or challenge detected")
-                elif "incorrect" in page_source or "invalid" in page_source:
-                    logger.error("❌ Invalid credentials")
+            try:
+                # Navigate to login page
+                logger.info("📍 Navigating to Roblox login page...")
+                self.driver.get("https://www.roblox.com/login")
+                
+                # Wait for page to fully load
+                WebDriverWait(self.driver, 30).until(
+                    EC.element_to_be_clickable((By.ID, "login-username"))
+                )
+                
+                # Enter username
+                logger.info("✏️ Entering username...")
+                username_field = self.driver.find_element(By.ID, "login-username")
+                username_field.clear()
+                time.sleep(0.5)
+                username_field.send_keys(self.alt_username)
+                
+                # Enter password  
+                logger.info("✏️ Entering password...")
+                password_field = self.driver.find_element(By.ID, "login-password")
+                password_field.clear()
+                time.sleep(0.5)
+                password_field.send_keys(self.alt_password)
+                
+                # Wait before clicking login
+                time.sleep(random.uniform(1, 3))
+                
+                # FIXED: Better login button click handling
+                logger.info("🖱️ Clicking login button...")
+                login_button = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.ID, "login-button"))
+                )
+                
+                # Try multiple click methods
+                try:
+                    # Method 1: Regular click
+                    login_button.click()
+                except:
+                    try:
+                        # Method 2: JavaScript click (bypasses interception)
+                        self.driver.execute_script("arguments[0].click();", login_button)
+                    except:
+                        # Method 3: Action chains click
+                        from selenium.webdriver.common.action_chains import ActionChains
+                        ActionChains(self.driver).move_to_element(login_button).click().perform()
+                
+                # Wait for login completion
+                logger.info("⏳ Waiting for login completion...")
+                WebDriverWait(self.driver, 30).until(
+                    lambda driver: "login" not in driver.current_url.lower()
+                )
+                
+                # Verify success
+                current_url = self.driver.current_url
+                logger.info(f"📍 Post-login URL: {current_url}")
+                
+                success_indicators = ["create.roblox.com", "home", "dashboard"]
+                if any(indicator in current_url for indicator in success_indicators):
+                    logger.info("✅ Login successful!")
+                    return True
                 else:
                     logger.error(f"❌ Login failed - unexpected URL: {current_url}")
-                
+                    return False
+                    
+            except Exception as e:
+                logger.error(f"❌ Login error: {e}")
                 return False
-                
-        except TimeoutException as e:
-            logger.error(f"❌ Login timeout: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"❌ Login error: {e}")
-            return False
     
     def download_csv_files(self):
         """FIXED: Enhanced CSV download with better navigation"""
