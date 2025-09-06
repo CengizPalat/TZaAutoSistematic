@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-RAILWAY.APP CSV AUTOMATION - Cloud-based CSV Downloader
-Runs on Railway.app, downloads CSVs from Roblox, uploads to SparkedHosting
+RAILWAY.APP CSV AUTOMATION - FIXED VERSION
+Compatible with Railway.app Chrome dependencies
 """
 
 import os
@@ -13,10 +13,12 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from datetime import datetime
 import logging
 import requests
 import glob
+import subprocess
 
 # Configure logging
 logging.basicConfig(
@@ -26,7 +28,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class RailwayCSVDownloader:
-    """Railway.app CSV downloader for Roblox analytics"""
+    """Railway.app compatible CSV downloader with fixed ChromeDriver"""
     
     def __init__(self):
         # Get environment variables
@@ -49,25 +51,64 @@ class RailwayCSVDownloader:
         logger.info(f"📁 Download folder: {self.download_folder}")
         logger.info(f"🔗 API URL: {self.api_url}")
     
+    def install_chrome_dependencies(self):
+        """Install Chrome and ChromeDriver for Railway.app"""
+        logger.info("🔧 Installing Chrome dependencies for Railway.app...")
+        
+        try:
+            # Install Chrome
+            commands = [
+                "apt-get update",
+                "apt-get install -y wget gnupg",
+                "wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -",
+                "echo 'deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main' >> /etc/apt/sources.list.d/google.list",
+                "apt-get update",
+                "apt-get install -y google-chrome-stable",
+                "apt-get install -y chromium-chromedriver"
+            ]
+            
+            for cmd in commands:
+                try:
+                    subprocess.run(cmd.split(), check=True, capture_output=True)
+                    logger.info(f"✅ Command executed: {cmd}")
+                except subprocess.CalledProcessError as e:
+                    logger.warning(f"⚠️ Command failed: {cmd} - {e}")
+                    continue
+            
+            logger.info("✅ Chrome dependencies installed")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Chrome installation failed: {e}")
+            return False
+    
     def setup_browser(self):
-        """Setup Chrome browser for Railway.app (headless environment)"""
+        """Setup Chrome browser for Railway.app with dependency installation"""
         logger.info("🌐 Setting up Chrome browser...")
+        
+        # Try to install dependencies first
+        self.install_chrome_dependencies()
         
         chrome_options = Options()
         
-        # Railway.app requires headless mode
+        # Railway.app requires these settings
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--disable-features=VizDisplayCompositor")
         chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("--disable-plugins")
-        
-        # Performance optimizations
         chrome_options.add_argument("--disable-images")
         chrome_options.add_argument("--disable-javascript")
         chrome_options.add_argument("--disable-css")
+        
+        # Additional Railway.app compatibility
+        chrome_options.add_argument("--remote-debugging-port=9222")
+        chrome_options.add_argument("--disable-background-timer-throttling")
+        chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+        chrome_options.add_argument("--disable-renderer-backgrounding")
         
         # Download preferences
         prefs = {
@@ -82,11 +123,67 @@ class RailwayCSVDownloader:
         chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         
         try:
-            self.driver = webdriver.Chrome(options=chrome_options)
-            logger.info("✅ Chrome browser setup complete")
-            return True
+            # Try multiple ChromeDriver paths
+            chromedriver_paths = [
+                "/usr/bin/chromedriver",
+                "/usr/local/bin/chromedriver",
+                "/opt/google/chrome/chromedriver",
+                None  # Let Selenium auto-detect
+            ]
+            
+            for path in chromedriver_paths:
+                try:
+                    if path:
+                        service = Service(executable_path=path)
+                        self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                    else:
+                        self.driver = webdriver.Chrome(options=chrome_options)
+                    
+                    logger.info(f"✅ Chrome browser setup complete (path: {path or 'auto-detected'})")
+                    return True
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed with ChromeDriver path {path}: {e}")
+                    continue
+            
+            # If all paths fail, try downloading ChromeDriver
+            logger.info("🔄 Attempting to download ChromeDriver...")
+            return self.download_and_setup_chromedriver(chrome_options)
+            
         except Exception as e:
             logger.error(f"❌ Browser setup failed: {e}")
+            return False
+    
+    def download_and_setup_chromedriver(self, chrome_options):
+        """Download and setup ChromeDriver manually"""
+        try:
+            import zipfile
+            import urllib.request
+            
+            # Download ChromeDriver
+            chromedriver_url = "https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip"
+            chromedriver_zip = "/tmp/chromedriver.zip"
+            chromedriver_path = "/tmp/chromedriver"
+            
+            logger.info("📥 Downloading ChromeDriver...")
+            urllib.request.urlretrieve(chromedriver_url, chromedriver_zip)
+            
+            # Extract ChromeDriver
+            with zipfile.ZipFile(chromedriver_zip, 'r') as zip_ref:
+                zip_ref.extractall("/tmp/")
+            
+            # Make executable
+            os.chmod(chromedriver_path, 0o755)
+            
+            # Create driver with custom path
+            service = Service(executable_path=chromedriver_path)
+            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            
+            logger.info("✅ ChromeDriver downloaded and setup complete")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ ChromeDriver download failed: {e}")
             return False
     
     def safe_login(self):
@@ -96,30 +193,36 @@ class RailwayCSVDownloader:
         try:
             # Go to login page
             self.driver.get("https://www.roblox.com/login")
-            time.sleep(5)
+            time.sleep(8)
             
             # Find username field
-            username_field = WebDriverWait(self.driver, 20).until(
+            username_field = WebDriverWait(self.driver, 30).until(
                 EC.element_to_be_clickable((By.ID, "login-username"))
             )
             
             # Enter username
             username_field.clear()
-            username_field.send_keys(self.alt_username)
+            for char in self.alt_username:
+                username_field.send_keys(char)
+                time.sleep(random.uniform(0.1, 0.3))
+            
             time.sleep(2)
             
             # Find password field
             password_field = self.driver.find_element(By.ID, "login-password")
             password_field.clear()
-            password_field.send_keys(self.alt_password)
-            time.sleep(2)
+            for char in self.alt_password:
+                password_field.send_keys(char)
+                time.sleep(random.uniform(0.1, 0.3))
+            
+            time.sleep(3)
             
             # Click login button
             login_button = self.driver.find_element(By.ID, "login-button")
             login_button.click()
             
             # Wait for login to complete
-            time.sleep(10)
+            time.sleep(15)
             
             # Check if login was successful
             current_url = self.driver.current_url
@@ -141,7 +244,7 @@ class RailwayCSVDownloader:
         try:
             # Navigate to creator dashboard
             self.driver.get("https://create.roblox.com/dashboard/creations")
-            time.sleep(8)
+            time.sleep(10)
             
             # Find games (experiences)
             game_links = self.driver.find_elements(By.XPATH, "//a[contains(@href, 'experiences')]")
@@ -154,7 +257,7 @@ class RailwayCSVDownloader:
             
             # Click on first game (should be Tattoo Studio Tycoon)
             game_links[0].click()
-            time.sleep(8)
+            time.sleep(10)
             
             # Navigate to Analytics section
             analytics_found = False
@@ -181,15 +284,14 @@ class RailwayCSVDownloader:
                 logger.error("❌ Could not find Analytics section")
                 return []
             
-            time.sleep(8)
+            time.sleep(10)
             logger.info("✅ Navigated to Analytics section")
             
             # Look for export/download buttons
             export_selectors = [
                 "//button[contains(text(), 'Export')]",
                 "//button[contains(text(), 'Download')]",
-                "//a[contains(text(), 'Export')]",
-                "//span[contains(text(), 'Export')]"
+                "//a[contains(text(), 'Export')]"
             ]
             
             export_buttons = []
@@ -202,9 +304,9 @@ class RailwayCSVDownloader:
             
             logger.info(f"🎯 Found {len(export_buttons)} potential export buttons")
             
-            # Download CSVs (limit to 3 to be safe)
+            # Download CSVs (limit to 2 to be safe)
             download_count = 0
-            max_downloads = 3
+            max_downloads = 2
             
             for button in export_buttons[:max_downloads]:
                 try:
@@ -214,7 +316,7 @@ class RailwayCSVDownloader:
                     if button.is_displayed() and button.is_enabled():
                         logger.info(f"📊 Clicking export button {download_count + 1}")
                         button.click()
-                        time.sleep(5)
+                        time.sleep(8)
                         download_count += 1
                     
                 except Exception as e:
@@ -223,7 +325,7 @@ class RailwayCSVDownloader:
             
             # Wait for downloads to complete
             logger.info("⏳ Waiting for downloads to complete...")
-            time.sleep(15)
+            time.sleep(20)
             
             # Find downloaded CSV files
             csv_files = glob.glob(os.path.join(self.download_folder, "*.csv"))
@@ -264,7 +366,7 @@ class RailwayCSVDownloader:
                 response = requests.post(
                     f"{self.api_url}/upload-csv",
                     files=files,
-                    timeout=30
+                    timeout=60
                 )
                 
                 if response.status_code == 200:
@@ -307,6 +409,7 @@ class RailwayCSVDownloader:
         try:
             # Setup browser
             if not self.setup_browser():
+                logger.error("❌ Browser setup failed, aborting automation")
                 return False
             
             # Login to Roblox
@@ -346,7 +449,7 @@ class RailwayCSVDownloader:
 def main():
     """Main function for Railway.app deployment"""
     logger.info("=" * 60)
-    logger.info("🚂 RAILWAY CSV AUTOMATION STARTING")
+    logger.info("🚂 RAILWAY CSV AUTOMATION STARTING (FIXED VERSION)")
     logger.info("=" * 60)
     
     # Environment check
@@ -367,8 +470,8 @@ def main():
     schedule.every().day.at("21:00").do(downloader.run_automation)  # Backup time
     
     logger.info("📅 Scheduled CSV downloads:")
-    logger.info("   - Daily at 09:00 UTC (3:00 AM CST)")
-    logger.info("   - Daily at 21:00 UTC (3:00 PM CST)")
+    logger.info("   - Daily at 09:00 UTC")
+    logger.info("   - Daily at 21:00 UTC")
     
     # Run test download immediately
     logger.info("🧪 Running initial test download...")
@@ -377,7 +480,7 @@ def main():
     if success:
         logger.info("✅ Test download completed successfully!")
     else:
-        logger.error("❌ Test download failed - check logs above")
+        logger.error("❌ Test download failed - will retry at scheduled times")
     
     # Keep scheduler running
     logger.info("🔄 Scheduler active, waiting for scheduled times...")
