@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 FIXED: Railway.app CSV Automation using Remote WebDriver
-Expert solution using Railway's Selenium Standalone Chrome template
+Complete solution with proper error handling and debugging
 """
 
 import os
@@ -13,276 +13,431 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from datetime import datetime
 import logging
 import requests
 import glob
+import json
+from pathlib import Path
 
-# Configure logging
+# Configure comprehensive logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()  # Railway logs to stdout
+    ]
 )
 logger = logging.getLogger(__name__)
 
 class RailwayCSVDownloader:
-    """Expert solution: Remote WebDriver using Railway's Selenium template"""
+    """FIXED: Railway CSV automation with remote Selenium service"""
     
     def __init__(self):
-        # Get environment variables
+        # Environment variables with validation
         self.alt_username = os.getenv('ALT_ROBLOX_USERNAME')
         self.alt_password = os.getenv('ALT_ROBLOX_PASSWORD')
         self.api_url = os.getenv('SPARKEDHOSTING_API_URL', 'http://208.87.101.142:5000/api')
         
-        # NEW: Remote Selenium URL from Railway template
-        self.selenium_remote_url = os.getenv('SELENIUM_REMOTE_URL', 'http://localhost:4444/wd/hub')
+        # FIXED: Use HTTP for Selenium hub (not HTTPS)
+        self.selenium_url = os.getenv('SELENIUM_REMOTE_URL', 'http://localhost:4444/wd/hub')
         
-        # Download folder
-        self.download_folder = "/tmp/roblox_downloads"
+        # FIXED: Railway-compatible paths
+        self.download_folder = '/tmp/downloads'
         self.driver = None
         
         # Create download folder
-        os.makedirs(self.download_folder, exist_ok=True)
+        Path(self.download_folder).mkdir(parents=True, exist_ok=True)
         
-        # Validate credentials
-        if not all([self.alt_username, self.alt_password]):
-            raise ValueError("❌ Missing ALT_ROBLOX_USERNAME or ALT_ROBLOX_PASSWORD environment variables")
+        # Validate environment
+        self._validate_environment()
         
-        logger.info("✅ Railway CSV downloader initialized (EXPERT SOLUTION)")
+        logger.info("🚂 Railway CSV downloader initialized")
         logger.info(f"📁 Download folder: {self.download_folder}")
         logger.info(f"🔗 API URL: {self.api_url}")
-        logger.info(f"🌐 Selenium Remote URL: {self.selenium_remote_url}")
+        logger.info(f"🌐 Selenium URL: {self.selenium_url}")
+    
+    def _validate_environment(self):
+        """Validate all required environment variables"""
+        missing = []
+        
+        if not self.alt_username:
+            missing.append('ALT_ROBLOX_USERNAME')
+        if not self.alt_password:
+            missing.append('ALT_ROBLOX_PASSWORD')
+            
+        if missing:
+            raise ValueError(f"❌ Missing environment variables: {', '.join(missing)}")
+        
+        logger.info("✅ Environment validation passed")
     
     def setup_remote_browser(self):
-        """Connect to Railway Selenium service"""
+        """FIXED: Connect to Railway Selenium service with proper configuration"""
         logger.info("🌐 Connecting to Railway Selenium service...")
         
-        try:
-            chrome_options = Options()
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
-            chrome_options.add_argument("--disable-gpu")
-            
-            selenium_url = os.getenv('SELENIUM_REMOTE_URL', 'https://standalone-chrome-production-eb24.up.railway.app/wd/hub')
-            
-            logger.info(f"🔗 Connecting to: {selenium_url}")
-            
-            self.driver = webdriver.Remote(
-                command_executor=selenium_url,
-                options=chrome_options
-            )
-            
-            logger.info("✅ Railway Selenium connected successfully!")
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Railway Selenium connection failed: {e}")
-            return False
+        max_retries = 3
+        
+        for attempt in range(max_retries):
+            try:
+                # FIXED: Optimized Chrome options for Railway
+                chrome_options = Options()
+                chrome_options.add_argument("--no-sandbox")
+                chrome_options.add_argument("--disable-dev-shm-usage")
+                chrome_options.add_argument("--disable-gpu")
+                chrome_options.add_argument("--headless")  # Essential for Railway
+                chrome_options.add_argument("--disable-web-security")
+                chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+                chrome_options.add_argument("--window-size=1920,1080")
+                
+                # FIXED: Download preferences for remote browser
+                prefs = {
+                    "download.default_directory": self.download_folder,
+                    "download.prompt_for_download": False,
+                    "download.directory_upgrade": True,
+                    "safebrowsing.enabled": True
+                }
+                chrome_options.add_experimental_option("prefs", prefs)
+                
+                # FIXED: Connection timeout and retry logic
+                logger.info(f"🔌 Attempt {attempt + 1}: Connecting to {self.selenium_url}")
+                
+                self.driver = webdriver.Remote(
+                    command_executor=self.selenium_url,
+                    options=chrome_options
+                )
+                
+                # Test connection with a simple command
+                self.driver.set_page_load_timeout(30)
+                self.driver.implicitly_wait(10)
+                
+                # Verify connection
+                logger.info("🧪 Testing Selenium connection...")
+                self.driver.get("https://httpbin.org/ip")
+                
+                logger.info("✅ Railway Selenium connected successfully!")
+                return True
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Connection attempt {attempt + 1} failed: {e}")
+                
+                if self.driver:
+                    try:
+                        self.driver.quit()
+                    except:
+                        pass
+                    self.driver = None
+                
+                if attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 5
+                    logger.info(f"⏳ Waiting {wait_time}s before retry...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error("❌ All connection attempts failed")
+                    return False
+        
+        return False
     
-    def setup_browserless_fallback(self):
-        """EXPERT FALLBACK: Use Browserless service"""
+    def test_selenium_connection(self):
+        """Test Selenium service availability before main automation"""
+        logger.info("🔍 Testing Railway Selenium service availability...")
+        
         try:
-            chrome_options = Options()
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
-            chrome_options.add_argument("--disable-gpu")
+            # Test if Selenium hub is responding
+            test_url = self.selenium_url.replace('/wd/hub', '/status')
+            logger.info(f"📡 Testing Selenium status at: {test_url}")
             
-            # Browserless WebSocket connection
-            browserless_url = "wss://chrome.browserless.io/webdriver"
+            response = requests.get(test_url, timeout=10)
             
-            self.driver = webdriver.Remote(
-                command_executor=browserless_url,
-                options=chrome_options
-            )
-            
-            logger.info("✅ Browserless fallback setup complete!")
-            return True
-            
+            if response.status_code == 200:
+                logger.info("✅ Selenium service is responding")
+                return True
+            else:
+                logger.warning(f"⚠️ Selenium service returned HTTP {response.status_code}")
+                return False
+                
         except Exception as e:
-            logger.error(f"❌ Browserless fallback failed: {e}")
+            logger.error(f"❌ Selenium service test failed: {e}")
             return False
     
     def safe_login(self):
-        """Login to Roblox with EXPERT timing strategies"""
-        logger.info("🔐 Logging into Roblox with expert timing...")
+        """FIXED: Enhanced login with better error handling"""
+        logger.info("🔐 Logging into Roblox...")
         
         try:
-            # Go to login page
+            # Navigate to login page
+            logger.info("📍 Navigating to Roblox login page...")
             self.driver.get("https://www.roblox.com/login")
             
-            # EXPERT: Use explicit waits instead of time.sleep()
+            # FIXED: Better element waiting
+            logger.info("🔍 Looking for username field...")
             username_field = WebDriverWait(self.driver, 30).until(
                 EC.element_to_be_clickable((By.ID, "login-username"))
             )
             
-            # Enter username with human-like timing
+            # Clear and enter username
             username_field.clear()
-            for char in self.alt_username:
-                username_field.send_keys(char)
-                time.sleep(random.uniform(0.1, 0.3))
+            time.sleep(0.5)
+            username_field.send_keys(self.alt_username)
             
-            # Wait and find password field
+            logger.info("🔍 Looking for password field...")
             password_field = WebDriverWait(self.driver, 10).until(
                 EC.element_to_be_clickable((By.ID, "login-password"))
             )
             
+            # Clear and enter password
             password_field.clear()
-            for char in self.alt_password:
-                password_field.send_keys(char)
-                time.sleep(random.uniform(0.1, 0.3))
+            time.sleep(0.5)
+            password_field.send_keys(self.alt_password)
             
+            # Human-like delay
             time.sleep(random.uniform(1, 3))
             
-            # Click login button with explicit wait
+            # Find and click login button
+            logger.info("🔍 Looking for login button...")
             login_button = WebDriverWait(self.driver, 10).until(
                 EC.element_to_be_clickable((By.ID, "login-button"))
             )
+            
+            logger.info("🖱️ Clicking login button...")
             login_button.click()
             
-            # Wait for login completion
-            WebDriverWait(self.driver, 20).until(
+            # Wait for login to complete
+            logger.info("⏳ Waiting for login completion...")
+            WebDriverWait(self.driver, 30).until(
                 lambda driver: "login" not in driver.current_url.lower()
             )
             
-            # Check success
+            # Verify login success
             current_url = self.driver.current_url
-            if any(indicator in current_url for indicator in ["create.roblox.com", "home", "dashboard"]):
+            logger.info(f"📍 Current URL after login: {current_url}")
+            
+            success_indicators = ["create.roblox.com", "home", "dashboard"]
+            if any(indicator in current_url for indicator in success_indicators):
                 logger.info("✅ Login successful!")
                 return True
             else:
-                logger.error(f"❌ Login failed - URL: {current_url}")
+                # Check for specific error indicators
+                page_source = self.driver.page_source.lower()
+                if "captcha" in page_source or "challenge" in page_source:
+                    logger.error("❌ CAPTCHA or challenge detected")
+                elif "incorrect" in page_source or "invalid" in page_source:
+                    logger.error("❌ Invalid credentials")
+                else:
+                    logger.error(f"❌ Login failed - unexpected URL: {current_url}")
+                
                 return False
                 
+        except TimeoutException as e:
+            logger.error(f"❌ Login timeout: {e}")
+            return False
         except Exception as e:
             logger.error(f"❌ Login error: {e}")
             return False
     
     def download_csv_files(self):
-        """Download CSV files with EXPERT error handling"""
-        logger.info("📥 Starting expert CSV download process...")
+        """FIXED: Enhanced CSV download with better navigation"""
+        logger.info("📥 Starting CSV download process...")
         
         try:
             # Navigate to creator dashboard
+            logger.info("📍 Navigating to creator dashboard...")
             self.driver.get("https://create.roblox.com/dashboard/creations")
             
-            # EXPERT: Wait for page load
-            WebDriverWait(self.driver, 20).until(
-                EC.presence_of_element_located((By.XPATH, "//a[contains(@href, 'experiences')]"))
+            # Wait for page load
+            WebDriverWait(self.driver, 30).until(
+                EC.presence_of_element_located((By.XPATH, "//a[contains(@href, 'experiences') or contains(text(), 'experience')]"))
             )
             
-            # Find games
-            game_links = self.driver.find_elements(By.XPATH, "//a[contains(@href, 'experiences')]")
+            # Find games with multiple selectors
+            game_selectors = [
+                "//a[contains(@href, 'experiences')]",
+                "//div[contains(text(), 'Tattoo Studio')]/..",
+                "//a[contains(text(), 'Tattoo')]"
+            ]
             
-            if not game_links:
+            game_element = None
+            for selector in game_selectors:
+                try:
+                    elements = self.driver.find_elements(By.XPATH, selector)
+                    if elements:
+                        game_element = elements[0]
+                        logger.info(f"✅ Found game using selector: {selector}")
+                        break
+                except:
+                    continue
+            
+            if not game_element:
                 logger.error("❌ No games found in dashboard")
                 return []
             
-            logger.info(f"🎮 Found {len(game_links)} games")
+            # Click game
+            logger.info("🖱️ Clicking on game...")
+            self.driver.execute_script("arguments[0].click();", game_element)
             
-            # Click first game
-            game_links[0].click()
-            
-            # Wait for game page load
-            WebDriverWait(self.driver, 20).until(
-                lambda driver: "experiences" in driver.current_url
+            # Wait for game page
+            WebDriverWait(self.driver, 30).until(
+                lambda driver: "experiences" in driver.current_url or "games" in driver.current_url
             )
             
-            # Navigate to Analytics with explicit wait
-            analytics_link = WebDriverWait(self.driver, 20).until(
-                EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), 'Analytics') or contains(@href, 'analytics')]"))
-            )
-            analytics_link.click()
+            logger.info("📍 Navigating to Analytics...")
             
-            # Wait for analytics page
-            WebDriverWait(self.driver, 20).until(
+            # Multiple selectors for Analytics link
+            analytics_selectors = [
+                "//a[contains(text(), 'Analytics')]",
+                "//a[contains(@href, 'analytics')]",
+                "//button[contains(text(), 'Analytics')]",
+                "//div[contains(text(), 'Analytics')]/parent::a"
+            ]
+            
+            analytics_element = None
+            for selector in analytics_selectors:
+                try:
+                    element = WebDriverWait(self.driver, 10).until(
+                        EC.element_to_be_clickable((By.XPATH, selector))
+                    )
+                    analytics_element = element
+                    logger.info(f"✅ Found Analytics using: {selector}")
+                    break
+                except:
+                    continue
+            
+            if not analytics_element:
+                logger.error("❌ Analytics section not found")
+                return []
+            
+            # Click Analytics
+            self.driver.execute_script("arguments[0].click();", analytics_element)
+            
+            # Wait for Analytics page
+            WebDriverWait(self.driver, 30).until(
                 lambda driver: "analytics" in driver.current_url
             )
             
-            logger.info("✅ Navigated to Analytics section")
+            logger.info("✅ Successfully navigated to Analytics")
             
-            # Find export buttons with improved selector
-            export_buttons = WebDriverWait(self.driver, 15).until(
-                EC.presence_of_all_elements_located((By.XPATH, "//button[contains(text(), 'Export') or contains(text(), 'Download')]"))
-            )
+            # Look for export buttons with multiple strategies
+            time.sleep(5)  # Let page fully load
             
-            logger.info(f"🎯 Found {len(export_buttons)} export buttons")
+            export_selectors = [
+                "//button[contains(text(), 'Export')]",
+                "//button[contains(text(), 'Download')]",
+                "//a[contains(text(), 'Export')]",
+                "//div[contains(text(), 'Export')]/following-sibling::button",
+                "//*[@role='button' and contains(text(), 'Export')]"
+            ]
             
-            # Download CSVs (limit to 2 for safety)
+            export_buttons = []
+            for selector in export_selectors:
+                try:
+                    buttons = self.driver.find_elements(By.XPATH, selector)
+                    export_buttons.extend(buttons)
+                except:
+                    continue
+            
+            # Remove duplicates
+            export_buttons = list(set(export_buttons))
+            
+            logger.info(f"🎯 Found {len(export_buttons)} potential export buttons")
+            
+            if not export_buttons:
+                logger.warning("⚠️ No export buttons found, trying alternative approach...")
+                
+                # Try right-click context menu approach
+                try:
+                    charts = self.driver.find_elements(By.XPATH, "//canvas | //svg | //*[contains(@class, 'chart')]")
+                    if charts:
+                        logger.info("🔍 Trying context menu approach...")
+                        from selenium.webdriver.common.action_chains import ActionChains
+                        ActionChains(self.driver).context_click(charts[0]).perform()
+                        time.sleep(2)
+                except:
+                    pass
+            
+            # Download available CSVs (limit to 3 for safety)
             download_count = 0
-            max_downloads = 2
+            max_downloads = 3
             
             for i, button in enumerate(export_buttons[:max_downloads]):
                 try:
                     if download_count >= max_downloads:
                         break
                     
-                    # Scroll to button and click
+                    logger.info(f"📊 Attempting download {download_count + 1}")
+                    
+                    # Scroll to button
                     self.driver.execute_script("arguments[0].scrollIntoView(true);", button)
                     time.sleep(1)
                     
-                    # Wait for button to be clickable
-                    WebDriverWait(self.driver, 10).until(
-                        EC.element_to_be_clickable(button)
-                    )
+                    # Click export button
+                    self.driver.execute_script("arguments[0].click();", button)
                     
-                    logger.info(f"📊 Clicking export button {download_count + 1}")
-                    button.click()
-                    
-                    # Wait between downloads
-                    time.sleep(random.uniform(3, 6))
+                    # Wait for download
+                    time.sleep(random.uniform(3, 8))
                     download_count += 1
                     
+                    logger.info(f"✅ Export {download_count} triggered")
+                    
                 except Exception as e:
-                    logger.warning(f"⚠️ Export button {i} error: {e}")
+                    logger.warning(f"⚠️ Export button {i} failed: {e}")
                     continue
             
             # Wait for downloads to complete
             logger.info("⏳ Waiting for downloads to complete...")
             time.sleep(15)
             
-            # Find downloaded CSV files
-            csv_files = glob.glob(os.path.join(self.download_folder, "*.csv"))
+            # Find downloaded files
+            csv_files = list(Path(self.download_folder).glob("*.csv"))
             
-            logger.info(f"✅ Found {len(csv_files)} CSV files:")
+            logger.info(f"📁 Found {len(csv_files)} CSV files:")
             for csv_file in csv_files:
-                file_size = os.path.getsize(csv_file)
-                logger.info(f"  📄 {os.path.basename(csv_file)} ({file_size} bytes)")
+                file_size = csv_file.stat().st_size
+                logger.info(f"  📄 {csv_file.name} ({file_size} bytes)")
             
-            return csv_files
+            return [str(f) for f in csv_files]
             
         except Exception as e:
             logger.error(f"❌ CSV download error: {e}")
             return []
     
     def upload_csv_to_sparkedhosting(self, csv_files):
-        """Upload CSV files with expert retry logic"""
+        """FIXED: Enhanced upload with better error handling"""
         logger.info(f"📤 Uploading {len(csv_files)} files to SparkedHosting...")
+        
+        if not csv_files:
+            logger.warning("⚠️ No CSV files to upload")
+            return 0
         
         uploaded_count = 0
         
         for csv_file in csv_files:
-            # Retry mechanism
             max_retries = 3
+            
             for attempt in range(max_retries):
                 try:
-                    # Prepare file
+                    # Prepare file with timestamp
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    original_name = os.path.basename(csv_file)
+                    original_name = Path(csv_file).name
                     new_name = f"railway_{timestamp}_{original_name}"
                     
                     # Read file
                     with open(csv_file, 'rb') as f:
                         file_content = f.read()
                     
-                    # Upload
+                    if len(file_content) == 0:
+                        logger.warning(f"⚠️ Skipping empty file: {original_name}")
+                        break
+                    
+                    # Prepare upload
                     files = {'files': (new_name, file_content, 'text/csv')}
                     
-                    logger.info(f"📤 Uploading: {new_name} (attempt {attempt + 1})")
+                    logger.info(f"📤 Uploading: {new_name} (attempt {attempt + 1}, {len(file_content)} bytes)")
                     
+                    # Upload with timeout
                     response = requests.post(
                         f"{self.api_url}/upload-csv",
                         files=files,
-                        timeout=60
+                        timeout=120
                     )
                     
                     if response.status_code == 200:
@@ -290,65 +445,70 @@ class RailwayCSVDownloader:
                         uploaded_count += 1
                         break
                     else:
-                        logger.warning(f"⚠️ Upload attempt {attempt + 1} failed: HTTP {response.status_code}")
+                        logger.warning(f"⚠️ Upload failed: HTTP {response.status_code}")
                         if attempt == max_retries - 1:
                             logger.error(f"❌ Upload failed after {max_retries} attempts")
                         else:
-                            time.sleep(5)  # Wait before retry
+                            time.sleep(5 * (attempt + 1))  # Exponential backoff
                 
                 except Exception as e:
                     logger.warning(f"⚠️ Upload attempt {attempt + 1} error: {e}")
                     if attempt == max_retries - 1:
-                        logger.error(f"❌ Upload failed after {max_retries} attempts")
+                        logger.error(f"❌ Upload failed after {max_retries} attempts: {e}")
                     else:
-                        time.sleep(5)  # Wait before retry
+                        time.sleep(5 * (attempt + 1))
         
         return uploaded_count
     
     def cleanup(self):
-        """Expert cleanup with proper error handling"""
-        logger.info("🧹 Expert cleanup...")
+        """Enhanced cleanup with proper error handling"""
+        logger.info("🧹 Cleaning up...")
         
         try:
             if self.driver:
                 self.driver.quit()
-                logger.info("✅ Remote browser session closed")
+                logger.info("✅ Browser session closed")
         except Exception as e:
             logger.warning(f"⚠️ Browser cleanup warning: {e}")
         
         try:
-            # Remove downloaded files
-            for file in glob.glob(os.path.join(self.download_folder, "*")):
-                os.remove(file)
+            # Clean download folder
+            for file_path in Path(self.download_folder).glob("*"):
+                file_path.unlink()
             logger.info("✅ Temporary files cleaned")
         except Exception as e:
             logger.warning(f"⚠️ File cleanup warning: {e}")
     
     def run_automation(self):
-        """EXPERT main automation with comprehensive error handling"""
-        logger.info("🚀 Starting EXPERT Railway CSV automation...")
+        """ENHANCED: Main automation with comprehensive error handling and debugging"""
+        logger.info("🚀 Starting Railway CSV automation...")
         
         start_time = datetime.now()
         
         try:
-            # Setup remote browser
+            # Step 1: Test Selenium service
+            if not self.test_selenium_connection():
+                logger.error("❌ Selenium service not available, aborting")
+                return False
+            
+            # Step 2: Setup remote browser
             if not self.setup_remote_browser():
-                logger.error("❌ Remote browser setup failed, aborting automation")
+                logger.error("❌ Remote browser setup failed, aborting")
                 return False
             
-            # Login with expert timing
+            # Step 3: Login with enhanced error handling
             if not self.safe_login():
-                logger.error("❌ Login failed, aborting automation")
+                logger.error("❌ Login failed, aborting")
                 return False
             
-            # Download CSVs with expert error handling
+            # Step 4: Download CSVs
             csv_files = self.download_csv_files()
             
             if not csv_files:
                 logger.warning("⚠️ No CSV files downloaded")
                 return False
             
-            # Upload with retry logic
+            # Step 5: Upload to SparkedHosting
             uploaded_count = self.upload_csv_to_sparkedhosting(csv_files)
             
             # Report results
@@ -356,63 +516,113 @@ class RailwayCSVDownloader:
             duration = end_time - start_time
             
             if uploaded_count > 0:
-                logger.info(f"✅ EXPERT automation successful!")
-                logger.info(f"📊 Processed {uploaded_count}/{len(csv_files)} files")
+                logger.info("🎉 AUTOMATION SUCCESSFUL!")
+                logger.info(f"📊 Processed: {uploaded_count}/{len(csv_files)} files")
                 logger.info(f"⏱️ Duration: {duration}")
+                
+                # Send success notification to Discord (optional)
+                try:
+                    self.send_success_notification(uploaded_count, len(csv_files), duration)
+                except:
+                    pass  # Don't fail automation for notification issues
+                
                 return True
             else:
                 logger.error("❌ No files were uploaded successfully")
                 return False
                 
         except Exception as e:
-            logger.error(f"❌ Expert automation failed: {e}")
+            logger.error(f"❌ Automation failed with error: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
         finally:
             self.cleanup()
+    
+    def send_success_notification(self, uploaded_count, total_count, duration):
+        """Send success notification to SparkedHosting API"""
+        try:
+            notification_data = {
+                'message': f'🎉 Railway CSV automation successful!\n📊 Uploaded {uploaded_count}/{total_count} files\n⏱️ Duration: {duration}',
+                'timestamp': datetime.now().isoformat(),
+                'success': True
+            }
+            
+            requests.post(
+                f"{self.api_url}/automation-notification",
+                json=notification_data,
+                timeout=10
+            )
+        except:
+            pass  # Notification failure shouldn't affect automation
 
 def main():
-    """EXPERT main function with proper environment handling"""
+    """Enhanced main function with proper environment and error handling"""
     logger.info("=" * 60)
-    logger.info("🚂 RAILWAY CSV AUTOMATION - EXPERT SOLUTION")
+    logger.info("🚂 RAILWAY CSV AUTOMATION - PRODUCTION VERSION")
     logger.info("=" * 60)
     
-    # Environment check
-    logger.info("🔍 Expert environment check:")
-    logger.info(f"  ALT_ROBLOX_USERNAME: {'✅ Set' if os.getenv('ALT_ROBLOX_USERNAME') else '❌ Missing'}")
-    logger.info(f"  ALT_ROBLOX_PASSWORD: {'✅ Set' if os.getenv('ALT_ROBLOX_PASSWORD') else '❌ Missing'}")
-    logger.info(f"  SPARKEDHOSTING_API_URL: {os.getenv('SPARKEDHOSTING_API_URL', 'Using default')}")
-    logger.info(f"  SELENIUM_REMOTE_URL: {os.getenv('SELENIUM_REMOTE_URL', 'Using default')}")
+    # Environment diagnostics
+    logger.info("🔍 Environment diagnostics:")
+    env_vars = ['ALT_ROBLOX_USERNAME', 'ALT_ROBLOX_PASSWORD', 'SELENIUM_REMOTE_URL', 'SPARKEDHOSTING_API_URL']
+    
+    for var in env_vars:
+        value = os.getenv(var)
+        if value:
+            if 'PASSWORD' in var or 'TOKEN' in var:
+                masked = f"{value[:3]}***{value[-2:]}" if len(value) > 5 else "***"
+                logger.info(f"  {var}: {masked}")
+            else:
+                logger.info(f"  {var}: {value}")
+        else:
+            logger.warning(f"  {var}: ❌ Missing")
     
     # Create downloader instance
     try:
         downloader = RailwayCSVDownloader()
     except Exception as e:
-        logger.error(f"❌ Expert downloader setup failed: {e}")
+        logger.error(f"❌ Failed to create downloader: {e}")
         return
     
-    # Schedule daily downloads
-    schedule.every().day.at("09:00").do(downloader.run_automation)
-    schedule.every().day.at("21:00").do(downloader.run_automation)
+    # Check if this is Railway environment
+    if os.getenv('RAILWAY_ENVIRONMENT'):
+        logger.info("🚂 Running on Railway.app")
+        
+        # Schedule daily automation
+        schedule.every().day.at("09:00").do(downloader.run_automation)
+        schedule.every().day.at("21:00").do(downloader.run_automation)
+        
+        logger.info("📅 Scheduled CSV automation:")
+        logger.info("   - Daily at 09:00 UTC")
+        logger.info("   - Daily at 21:00 UTC")
+        
+        # Run test immediately
+        logger.info("🧪 Running initial test automation...")
+        success = downloader.run_automation()
+        
+        if success:
+            logger.info("✅ Test automation completed successfully!")
+        else:
+            logger.error("❌ Test automation failed - will retry at scheduled times")
+        
+        # Keep scheduler running
+        logger.info("🔄 Scheduler active, waiting for scheduled times...")
+        
+        while True:
+            schedule.run_pending()
+            time.sleep(60)
     
-    logger.info("📅 Expert scheduled CSV downloads:")
-    logger.info("   - Daily at 09:00 UTC")
-    logger.info("   - Daily at 21:00 UTC")
-    
-    # Run test download immediately
-    logger.info("🧪 Running expert test download...")
-    success = downloader.run_automation()
-    
-    if success:
-        logger.info("✅ Expert test download completed successfully!")
     else:
-        logger.error("❌ Expert test download failed - will retry at scheduled times")
-    
-    # Keep scheduler running
-    logger.info("🔄 Expert scheduler active, waiting for scheduled times...")
-    
-    while True:
-        schedule.run_pending()
-        time.sleep(60)
+        # Local testing
+        logger.info("💻 Running in local/test mode")
+        logger.info("🧪 Executing single test run...")
+        
+        success = downloader.run_automation()
+        
+        if success:
+            logger.info("✅ Test run completed successfully!")
+        else:
+            logger.error("❌ Test run failed")
 
 if __name__ == "__main__":
     main()
